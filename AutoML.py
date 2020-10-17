@@ -16,10 +16,16 @@ class DataPreprocessor(object):
             pandas.DataFrame: standarized DataFrame
         """
         data = deepcopy(X.replace(['nan'], 0))
+        standarization_matrix = pd.DataFrame(np.zeros((2, len(data.columns))), index = ['std', 'mean'], columns=data.columns)
         for column_name in data.columns:
             if standarization_rule in column_name and data[column_name].std() != 0:
+                standarization_matrix.loc['std', column_name] = data[column_name].std()
+                standarization_matrix.loc['mean', column_name] = data[column_name].mean()
                 data[column_name] = (data[column_name] - data[column_name].mean())/data[column_name].std()
-        return data
+            else:
+                standarization_matrix.loc['std', column_name] = 1
+                standarization_matrix.loc['mean', column_name] = 0
+        return data, standarization_matrix
 
     def __init__(self, data, standarization_rule = 'sensor', tolerance=pd.Timedelta('5s'), nan_value = -1, numerical_date = True):
         """init function of class DataProcessor
@@ -37,7 +43,9 @@ class DataPreprocessor(object):
             data_dfs[data_df_index] = data_dfs[data_df_index].sort_values(by='date')
 
         for data_df_index in range(len(data_dfs[:-1])):
-            data_dfs[data_df_index + 1] = pd.merge_asof(data_dfs[data_df_index], data_dfs[data_df_index + 1], on = "date",                              tolerance=tolerance, direction='backward', suffixes = ['_' + key for key in list                                                       (data.keys())[data_df_index:data_df_index+2]]).fillna(nan_value)
+            data_dfs[data_df_index + 1] = pd.merge_asof(data_dfs[data_df_index], data_dfs[data_df_index + 1],
+                                                                on = "date", tolerance=tolerance, direction='backward', 
+                                                                suffixes = ['_' + key for key in list(data.keys())[data_df_index:data_df_index+2]]).fillna(nan_value)
 
         self.data_df = data_dfs[-1]
         if numerical_date == True:
@@ -47,9 +55,11 @@ class DataPreprocessor(object):
             self.data_df['minute']  = self.data_df['date'].dt.minute
             self.data_df['second']  = self.data_df['date'].dt.second
         
-        self.data_df = self.standarize(self.data_df, standarization_rule=standarization_rule)
+        data_df, standarization_matrix = self.standarize(self.data_df, standarization_rule=standarization_rule)
+        self.data_df = data_df
+        self.standarization_matrix = standarization_matrix
 
-    def time_series(self, time_series_size = 3, forecast = 3, y_rule = 'device'):
+    def time_series(self, time_series_size = 3, forecast = 1, y_rule = 'device'):
         """Method of class DataProcessor that returns padded time series 
 
         Args:
@@ -99,8 +109,8 @@ class AutoTuningHyperparameters(object):
             y_rule (str, optional): [description]. Defaults to 'device_blinds'.
         """
         self.model = model 
-        data_preprocessor = DataPreprocessor(data, standarization_rule=standarization_rule)
-        X, y = data_preprocessor.time_series(time_series_size=time_series_size, forecast=forecast, y_rule = y_rule)
+        self.data_preprocessor = DataPreprocessor(data, standarization_rule=standarization_rule)
+        X, y = self.data_preprocessor.time_series(time_series_size=time_series_size, forecast=forecast, y_rule = y_rule)
         self.X_train = X[:int(0.7*len(X))]
         self.X_test = X[int(0.7*len(X)):]
         self.y_train = y[:int(0.7*len(y))]
